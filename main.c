@@ -80,6 +80,7 @@ int main(int argc, char* argv[])
     uint32_t speed = CH341A_STM_I2C_20K;
     int8_t c;
     int offset = 0;
+    int compare = 0;
 
     const char usage[] =
         "\nUsage:\n"\
@@ -87,6 +88,7 @@ int main(int argc, char* argv[])
         " -i, --info             read the chip ID info\n"\
         " -e, --erase            erase the entire chip\n"\
         " -v, --verbose          print verbose info\n"\
+        " -c, --compare          validate write operation\n"\
         " -l, --length <bytes>   manually set length\n"\
         " -w, --write <filename> write chip with data from filename\n"\
         " -o, --offset <bytes>   write data starting from specific offset\n"\
@@ -100,6 +102,7 @@ int main(int argc, char* argv[])
         {"write",   required_argument,  0, 'w'},
         {"length",  required_argument,  0, 'l'},
         {"verbose", no_argument,        0, 'v'},
+        {"compare", no_argument,        0, 'c'},
         {"write",   required_argument,  0, 'w'},
         {"offset",  required_argument,  0, 'o'},
         {"read",    required_argument,  0, 'r'},
@@ -109,7 +112,7 @@ int main(int argc, char* argv[])
 
         int32_t optidx = 0;
 
-        while ((c = getopt_long(argc, argv, "hiew:r:l:tdvo:", options, &optidx)) != -1){
+        while ((c = getopt_long(argc, argv, "hiew:r:l:tdvco:", options, &optidx)) != -1){
             switch (c) {
                 case 'i':
                 case 'e':
@@ -120,6 +123,9 @@ int main(int argc, char* argv[])
                     break;
                 case 'v':
                     verbose = 1;
+                    break;
+                case 'c':
+                    compare = 1;
                     break;
                 case 'w':
                 case 'r':
@@ -227,47 +233,50 @@ int main(int argc, char* argv[])
         fprintf(stderr, "File Size is [%d]\n", ret);
         ret = ch341SpiWrite(buf, offset, ret);
         if (ret == 0) {
-            printf("\nWrite ok! Try to verify... ");
-            FILE *test_file;
-            char *test_filename;
-            test_filename = (char*) malloc(strlen("./test-firmware.bin") + 1);
-            strcpy(test_filename, "./test-firmware.bin");
-
-            ret = ch341SpiRead(buf, offset, cap);
-            test_file = fopen(test_filename, "w+b");
-
-            if (!test_file) {
-                fprintf(stderr, "Couldn't open file %s for writing.\n", test_filename);
-                goto out;
-            }
-            fwrite(buf, 1, cap, test_file);
-
-            if (ferror(test_file))
-                fprintf(stderr, "Error writing file [%s]\n", test_filename);
-
-            fseek(fp, 0, SEEK_SET);
-            fseek(test_file, 0, SEEK_SET);
-
-            int ch1, ch2;
-            int checked_count = 0;
-            ch1 = getc(fp);
-            ch2 = getc(test_file);
-
-            while ((ch1 != EOF) && (ch2 != EOF) && (ch1 == ch2)) {
+            printf("\nWrite ok!\n");
+            if (compare) {
+                printf("Try to verify... ");
+                FILE *test_file;
+                char *test_filename;
+                test_filename = (char*) malloc(strlen("./test-firmware.bin") + 1);
+                strcpy(test_filename, "./test-firmware.bin");
+                
+                ret = ch341SpiRead(buf, offset, cap);
+                test_file = fopen(test_filename, "w+b");
+                
+                if (!test_file) {
+                    fprintf(stderr, "Couldn't open file %s for writing.\n", test_filename);
+                    goto out;
+                }
+                fwrite(buf, 1, cap, test_file);
+                
+                if (ferror(test_file))
+                    fprintf(stderr, "Error writing file [%s]\n", test_filename);
+                
+                fseek(fp, 0, SEEK_SET);
+                fseek(test_file, 0, SEEK_SET);
+                
+                int ch1, ch2;
+                int checked_count = 0;
                 ch1 = getc(fp);
                 ch2 = getc(test_file);
-                checked_count++;
+                
+                while ((ch1 != EOF) && (ch2 != EOF) && (ch1 == ch2)) {
+                    ch1 = getc(fp);
+                    ch2 = getc(test_file);
+                    checked_count++;
+                }
+                
+                if (ch1 == ch2 || (checked_count == cap))
+                    printf("\nWrite completed successfully. \n");
+                else
+                    printf("\nError while writing. Check your device. May be it need to be erased.\n");
+                
+                if (remove(test_filename) == 0)
+                    printf("\nAll done. \n");
+                else
+                    printf("\nTemp file could not be deleted");
             }
-
-            if (ch1 == ch2 || (checked_count == cap))
-                printf("\nWrite completed successfully. \n");
-            else
-                printf("\nError while writing. Check your device. May be it need to be erased.\n");
-
-            if (remove(test_filename) == 0)
-                printf("\nAll done. \n");
-            else
-                printf("\nTemp file could not be deleted");
         }
         fclose(fp);
     }
